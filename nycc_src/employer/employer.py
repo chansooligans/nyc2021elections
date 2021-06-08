@@ -22,6 +22,7 @@ def cleanname(s):
 @dataclass
 class heatmap:
     df: pd.DataFrame
+    value: str = 'AMNT'
 
     @cached_property
     def dfemp(self):
@@ -32,6 +33,9 @@ class heatmap:
                 'id':'count',
                 'AMNT':'sum'
             })
+            .rename({
+                'id':'count'
+            }, axis=1)
             .reset_index()
         )
 
@@ -41,7 +45,7 @@ class heatmap:
         names = employers[employers>8].index
 
         self.dfemp = self.dfemp.loc[self.dfemp['EMPNAME'].isin(names)].copy()
-        dfpivot = self.dfemp.pivot(index='EMPNAME', columns='CANDNAME', values='AMNT')
+        dfpivot = self.dfemp.pivot(index='EMPNAME', columns='CANDNAME', values=self.value)
         dfpivot = dfpivot.fillna(0)
         
         for row in dfpivot.index:
@@ -60,12 +64,15 @@ class heatmap:
 
     @cached_property
     def candidates_ordered(self):
-        return (
-            self.dfcands
-            .sort_values('pca', ascending=False)
-            .head(8)
-            .index
-            )
+        return ['McGuire, Raymond J', 'Yang, Andrew', 'Adams, Eric L',
+       'Garcia, Kathryn A', 'Wiley, Maya D', 'Morales, Dianne',
+       'Donovan, Shaun', 'Stringer, Scott M']
+        # return (
+        #     self.dfcands
+        #     .sort_values('pca', ascending=False)
+        #     .head(8)
+        #     .index
+        #     )
 
     @cached_property
     def df_heatmap(self):
@@ -87,5 +94,7 @@ class heatmap:
             self.df_heatmap,
             cbar=False
         )
+
+        ax.figure.savefig(f'chansoo/employer_heatmap_{self.value}.png', bbox_inches="tight")
 
         return ax
