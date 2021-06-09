@@ -6,6 +6,9 @@ from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+from fuzzywuzzy import process, fuzz
+import networkx as nx
+from tqdm import tqdm
 
 def normalize(x):
     return (x - min(x)) / (max(x) - min(x))
@@ -41,8 +44,31 @@ class heatmap:
 
     @cached_property
     def dfpivot(self):
-        employers = self.dfemp['EMPNAME'].value_counts()
-        names = employers[employers>8].index
+        
+        exclude = [
+            'nan', 'selfemployed', 'self employed', 'owner', 'not employed', 'unemployed', 'retired', 'none', 'na', 
+            ]
+
+        names = self.dfemp.loc[
+                (self.dfemp['count']>20) & (~self.dfemp['EMPNAME'].isin(exclude)),
+                'EMPNAME'
+            ].unique()
+
+        replace = [
+            ['doe', 'department of education']
+        ]
+
+        for x,y in replace:
+            names = [name.replace(x,y) for name in names]
+
+        fuzzymatches = self.get_fuzz_matches(names)
+
+        for candidates in fuzzymatches:
+            canonical = list(candidates)[0]
+            self.dfemp['EMPNAME'] = [canonical if name in list(candidates) else name for name in self.dfemp['EMPNAME']]
+            names = [canonical if name in list(candidates) else name for name in names]
+        
+        self.dfemp = self.dfemp.groupby(['EMPNAME','CANDNAME']).agg({'count':'sum', 'AMNT':'sum'}).reset_index()
 
         self.dfemp = self.dfemp.loc[self.dfemp['EMPNAME'].isin(names)].copy()
         dfpivot = self.dfemp.pivot(index='EMPNAME', columns='CANDNAME', values=self.value)
@@ -52,6 +78,19 @@ class heatmap:
             dfpivot.loc[row] = normalize(dfpivot.loc[row])
         
         return dfpivot
+
+    def get_fuzz_matches(self, names):
+
+        G = nx.Graph()
+
+        for name in tqdm(names):
+            results = process.extract(name, names, scorer=fuzz.token_sort_ratio)[1:]
+            matches = [x[0] for x in results if x[1] > 80]
+            for match in matches:
+                G.add_edge(name, match)
+
+        print(list(nx.connected_components(G)))
+        return list(nx.connected_components(G))
 
     @cached_property
     def dfcands(self):
@@ -64,15 +103,15 @@ class heatmap:
 
     @cached_property
     def candidates_ordered(self):
-        return ['McGuire, Raymond J', 'Yang, Andrew', 'Adams, Eric L',
-       'Garcia, Kathryn A', 'Wiley, Maya D', 'Morales, Dianne',
-       'Donovan, Shaun', 'Stringer, Scott M']
-        # return (
-        #     self.dfcands
-        #     .sort_values('pca', ascending=False)
-        #     .head(8)
-        #     .index
-        #     )
+    #     return ['McGuire, Raymond J', 'Yang, Andrew', 'Adams, Eric L',
+    #    'Garcia, Kathryn A', 'Wiley, Maya D', 'Morales, Dianne',
+    #    'Donovan, Shaun', 'Stringer, Scott M']
+        return (
+            self.dfcands
+            .drop('pca',axis=0)
+            .sort_values('pca', ascending=False)
+            .index
+            )
 
     @cached_property
     def df_heatmap(self):
@@ -89,6 +128,8 @@ class heatmap:
         x = pca.fit_transform(np.array(self.dfpivot))
         self.dfpivot['pca'] = x[:,0]
 
+        if self.value == "AMNT":
+            self.df_heatmap = self.df_heatmap.iloc[:,::-1]
         sns.set(rc={'figure.figsize':(10,20)})
         ax = sns.heatmap(
             self.df_heatmap,
